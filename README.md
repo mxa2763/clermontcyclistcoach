@@ -1,6 +1,6 @@
 # ClermontCyclistCoach (CCC) – Phase 1: accounts & OAuth
 
-Backend foundation: connect Strava (and, next, Intervals.icu) via OAuth, with tokens Fernet-encrypted at rest.
+Backend foundation: connect Strava and Intervals.icu via OAuth, with tokens Fernet-encrypted at rest.
 No plan generation or workout logic yet. `planned_workouts` and `activity_debriefs` exist as empty tables only.
 
 ## Run locally
@@ -28,7 +28,7 @@ Tests: `uv run pytest`
 | `BASE_URL` | Default `http://localhost:8000`. Redirect URIs are `{BASE_URL}/auth/{provider}/callback`. |
 | `SEED_USER_EMAIL` | Phase 1 has no login; this seeded user is always "current". |
 | `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | From https://www.strava.com/settings/api. Set **Authorization Callback Domain** to `localhost`. |
-| `INTERVALS_CLIENT_ID` / `INTERVALS_CLIENT_SECRET` | Issued manually by the Intervals.icu developer. |
+| `INTERVALS_CLIENT_ID` / `INTERVALS_CLIENT_SECRET` | OAuth client credentials, not your personal API key. Apply via "Apply for OAuth Access" at the bottom of intervals.icu/settings/apps; once approved they appear under "Manage App" on that page. `http://localhost/*` redirects are always allowed, so no redirect URL needs registering for local dev. |
 
 ## Manually testing the Strava loop
 
@@ -37,6 +37,20 @@ Tests: `uv run pytest`
 3. Approve. Strava redirects to `/auth/strava/callback`, which validates `state`, exchanges the code, encrypts the tokens and saves them, then returns you to `/` showing "connected" with your athlete id and scopes.
 4. Check the DB holds ciphertext only: `sqlite3 ccc.db "select provider, provider_athlete_id, substr(access_token_encrypted,1,20) from connected_accounts;"` (values start with `gAAAA`).
 5. Click **Disconnect**. This calls Strava's deauthorize endpoint, sets `revoked_at`, and wipes the stored tokens. The page then shows "not connected", and you can connect again.
+
+## Manually testing the Intervals.icu loop
+
+Needs the OAuth client credentials above in `.env` (restart the server after adding them).
+
+1. Open http://localhost:8000 and click **Connect Intervals.icu**. You're sent to `intervals.icu/oauth/authorize` with scopes `ACTIVITY:READ,CALENDAR:WRITE,WELLNESS:READ`.
+2. Approve promptly: the authorization code expires after about 2 minutes.
+3. Intervals.icu redirects to `/auth/intervals_icu/callback`, which validates `state`, exchanges the code, encrypts the token and saves it. The page shows "connected" with the athlete id and granted scopes.
+4. Check the DB: the row should have `refresh_token_encrypted` and `token_expires_at` both NULL (Intervals.icu tokens don't expire and have no refresh token) and an access token starting `gAAAA`.
+5. Click **Disconnect**. This sends `DELETE /api/v1/disconnect-app`, sets `revoked_at` and wipes the stored token.
+
+If the token exchange returns a 400, suspect the extra `grant_type`/`redirect_uri` form fields Authlib sends; Intervals.icu documents only `client_id`, `client_secret` and `code`.
+
+Note: a newly registered Strava app may be limited to connecting its owner's athlete until Strava approves a capacity increase.
 
 ## Layout
 
